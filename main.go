@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -16,7 +17,7 @@ var displayProgress = true
 
 func main() {
 	// var err error
-	var proxy, filePath, bwLimit, resumeTask string
+	var proxy, filePath, bwLimit, resumeTask, outputPath string
 
 	conn := flag.Int("n", runtime.NumCPU(), "number of connections")
 	skiptls := flag.Bool("skip-tls", true, "skip certificate verification for https")
@@ -24,15 +25,25 @@ func main() {
 	flag.StringVar(&filePath, "file", "", "path to a file that contains one URL per line")
 	flag.StringVar(&bwLimit, "rate", "", "bandwidth limit during download, e.g. -rate 10kB or -rate 10MiB")
 	flag.StringVar(&resumeTask, "resume", "", "resume download task with given task name (or URL)")
+	flag.StringVar(&outputPath, "output", "", "specify the output file path for the downloaded file")
 
 	flag.Parse()
 	args := flag.Args()
+	fmt.Printf("outputPath: %s\n", outputPath)
+	fmt.Printf("filePath: %s\n", filePath)
+	fmt.Printf("resumeTask: %s\n", resumeTask)
+	fmt.Printf("args: %s\n", args)
+	fmt.Printf("proxy: %s\n", proxy)
+	fmt.Printf("bwLimit: %s\n", bwLimit)
+	fmt.Printf("conn: %d\n", *conn)
+	fmt.Printf("skiptls: %v\n", *skiptls)
+	fmt.Printf("args: %s\n", args)
 
 	// If the resume flag is provided, use that path (ignoring other arguments)
 	if resumeTask != "" {
 		state, err := Resume(resumeTask)
 		FatalCheck(err)
-		Execute(state.URL, state, *conn, *skiptls, proxy, bwLimit)
+		Execute(state.URL, state, *conn, *skiptls, proxy, bwLimit, outputPath)
 		return
 	}
 
@@ -59,7 +70,7 @@ func main() {
 			}
 			url := string(line)
 			// Add the download task for each URL
-			g1.AddChild(downloadTask(url, nil, *conn, *skiptls, proxy, bwLimit))
+			g1.AddChild(downloadTask(url, nil, *conn, *skiptls, proxy, bwLimit, outputPath))
 		}
 		g1.Run(nil)
 		return
@@ -73,18 +84,18 @@ func main() {
 		err := os.RemoveAll(FolderOf(downloadURL))
 		FatalCheck(err)
 	}
-	Execute(downloadURL, nil, *conn, *skiptls, proxy, bwLimit)
+	Execute(downloadURL, nil, *conn, *skiptls, proxy, bwLimit, outputPath)
 }
 
-func downloadTask(url string, state *State, conn int, skiptls bool, proxy string, bwLimit string) task.Task {
+func downloadTask(url string, state *State, conn int, skiptls bool, proxy string, bwLimit string, outputPath string) task.Task {
 	run := func(t task.Task, ctx task.Context) {
-		Execute(url, state, conn, skiptls, proxy, bwLimit)
+		Execute(url, state, conn, skiptls, proxy, bwLimit, outputPath)
 	}
 	return task.NewTaskWithFunc(run)
 }
 
 // Execute configures the HTTPDownloader and uses it to download the target.
-func Execute(url string, state *State, conn int, skiptls bool, proxy string, bwLimit string) {
+func Execute(url string, state *State, conn int, skiptls bool, proxy string, bwLimit string, outputPath string) {
 	// Capture OS interrupt signals
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan,
@@ -144,7 +155,13 @@ func Execute(url string, state *State, conn int, skiptls bool, proxy string, bwL
 					Warnf("Interrupted, but the download is not resumable. Exiting silently.\n")
 				}
 			} else {
-				err := JoinFile(files, TaskFromURL(url))
+				// Use the specified output path or the default path
+				fmt.Printf("Output file: %s\n", outputPath)
+				outputFile := TaskFromURL(url)
+				if outputPath != "" {
+					outputFile = outputPath
+				}
+				err := JoinFile(files, outputFile)
 				FatalCheck(err)
 				err = os.RemoveAll(FolderOf(url))
 				FatalCheck(err)
@@ -166,5 +183,6 @@ Options:
   -file string    file path containing URLs (one per line)
   -rate string    bandwidth limit during download (e.g., 10kB, 10MiB)
   -resume string  resume a stopped download by providing its task name or URL
+  -output string  specify the output file path for the downloaded file
 `)
 }
